@@ -1,0 +1,25 @@
+# Visual Studio
+.vs/
+
+# Build output
+bin/
+obj/
+
+# User files
+*.user
+*.suo
+
+# Logs
+*.log
+
+# Keys / secrets
+**/keys/
+*.private.xml
+*.public.xml
+
+# NuGet
+packages/
+
+# OS
+.DS_Store
+Thumbs.db
