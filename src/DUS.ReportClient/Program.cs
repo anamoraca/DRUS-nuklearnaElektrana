@@ -48,9 +48,19 @@ namespace DUS.ReportClient
             Console.WriteLine("ALARM REPORT (sorted by priority desc):");
             foreach (var it in resp.Items)
             {
+                var old = Console.ForegroundColor;
+
+                if (it.Priority == AlarmPriority.P1) Console.ForegroundColor = ConsoleColor.Yellow;
+                else if (it.Priority == AlarmPriority.P2) Console.ForegroundColor = ConsoleColor.DarkYellow;
+                else if (it.Priority == AlarmPriority.P3) Console.ForegroundColor = ConsoleColor.Red;
+
                 var t = DateTimeOffset.FromUnixTimeMilliseconds(it.TimeUnixMs).LocalDateTime;
-                Console.WriteLine("{0} sensor={1} value={2:F2} time={3}", it.Priority, it.SensorId, it.Value, t.ToString("HH:mm:ss"));
+                Console.WriteLine("{0} client={1} sensor={2} value={3:F2} time={4}",
+                    it.Priority, it.ClientId, it.SensorId, it.Value, t.ToString("HH:mm:ss"));
+
+                Console.ForegroundColor = old;
             }
+
         }
 
         static string GetArg(string[] args, string key)

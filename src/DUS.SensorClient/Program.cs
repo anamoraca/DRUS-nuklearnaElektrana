@@ -11,6 +11,11 @@ namespace DUS.SensorClient
     {
         static long _msgId = 0;
         static ClientRole _role = ClientRole.Standby;
+        static ConsoleColor _baseColor = ConsoleColor.Gray;
+        static ClientRole _lastRolePrinted = (ClientRole)(-1);
+        static volatile bool _commPaused = false;
+
+
 
         static void Main(string[] args)
         {
@@ -55,6 +60,8 @@ namespace DUS.SensorClient
             // Heartbeat every 5s
             var hbTimer = new Timer(_ =>
             {
+                if (_commPaused) return;
+
                 try
                 {
                     var env = CryptoService.EncryptAndSign(
@@ -66,9 +73,29 @@ namespace DUS.SensorClient
                         serverPub);
 
                     var resp = proxy.Heartbeat(env);
-                    if (resp != null && resp.Ok) _role = resp.Role;
+                    if (resp != null && resp.Ok)
+                    {
+                        _role = resp.Role;
+                        if (_role != _lastRolePrinted)
+                        {
+                            Console.WriteLine($"ROLE UPDATE: {_role} (assignedColor={resp.AssignedConsoleColor})");
+                            _lastRolePrinted = _role;
+                        }
+
+
+                        ConsoleColor cc;
+                        if (!string.IsNullOrWhiteSpace(resp.AssignedConsoleColor)
+                            && Enum.TryParse(resp.AssignedConsoleColor, true, out cc))
+                        {
+                            _baseColor = cc;
+                        }
+                    }
+
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("HB ERROR: " + ex.Message);
+                }
             }, null, 0, 5000);
 
             var rnd = new Random();
@@ -78,8 +105,20 @@ namespace DUS.SensorClient
                 if (Console.KeyAvailable)
                 {
                     var cmd = Console.ReadLine();
-                    if (cmd == "crash") Environment.Exit(0);
-                    if (cmd == "sleep") Thread.Sleep(20000);
+                    if (cmd == "crash")
+                    {
+                        Console.WriteLine("CRASHING NOW...");
+                        Environment.FailFast("Simulated crash");
+                    }
+
+                    if (cmd == "sleep")
+                    {
+                        _commPaused = true;
+                        Console.WriteLine("SIMULATING DISCONNECT for 20s...");
+                        Thread.Sleep(20000);
+                        _commPaused = false;
+                        Console.WriteLine("BACK ONLINE.");
+                    }
                 }
 
                 if (_role == ClientRole.Active)
@@ -128,6 +167,11 @@ namespace DUS.SensorClient
         static void PrintValue(double v, AlarmPriority p)
         {
             var old = Console.ForegroundColor;
+
+            // Ako nema alarma, koristi boju koju je server dodelio za active senzore
+            Console.ForegroundColor = _baseColor;
+
+            // Ako ima alarma, override bojom alarma (žuto/narandžasto/crveno)
             if (p == AlarmPriority.P1) Console.ForegroundColor = ConsoleColor.Yellow;
             else if (p == AlarmPriority.P2) Console.ForegroundColor = ConsoleColor.DarkYellow;
             else if (p == AlarmPriority.P3) Console.ForegroundColor = ConsoleColor.Red;
@@ -136,6 +180,7 @@ namespace DUS.SensorClient
 
             Console.ForegroundColor = old;
         }
+
 
         static string GetArg(string[] args, string key)
         {

@@ -61,9 +61,16 @@ namespace DUS.Contracts
     [DataContract]
     public class AlarmReportItemDto
     {
+        [DataMember] public string ClientId { get; set; }
         [DataMember] public int SensorId { get; set; }
         [DataMember] public AlarmPriority Priority { get; set; }
         [DataMember] public double Value { get; set; }
         [DataMember] public long TimeUnixMs { get; set; }
+
+        public AlarmReportItemDto()
+        {
+            ClientId = "";
+        }
     }
+
 }

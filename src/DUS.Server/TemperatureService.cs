@@ -32,6 +32,39 @@ namespace DUS.Server
         private static readonly TimeSpan HeartbeatTimeout = TimeSpan.FromSeconds(15);
         private static readonly TimeSpan FailureScanPeriod = TimeSpan.FromSeconds(5);
 
+        private static readonly string[] ActivePalette = new[]
+{
+    "Cyan", "Green", "Magenta", "Blue", "White"
+};
+
+        private string PickFreeActiveColor()
+        {
+            var used = _clients.Values
+                .Where(c => c.Role == ClientRole.Active && !c.IsDead)
+                .Select(c => c.AssignedColor ?? "Gray")
+                .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            foreach (var c in ActivePalette)
+                if (!used.Contains(c)) return c;
+
+            return "Gray";
+        }
+
+        private static ConsoleColor ToConsoleColor(string s)
+        {
+            ConsoleColor cc;
+            return Enum.TryParse(s, ignoreCase: true, result: out cc) ? cc : ConsoleColor.Gray;
+        }
+
+        private static ConsoleColor AlarmColor(AlarmPriority p)
+        {
+            if (p == AlarmPriority.P1) return ConsoleColor.Yellow;
+            if (p == AlarmPriority.P2) return ConsoleColor.DarkYellow; // narandžasto-ish
+            if (p == AlarmPriority.P3) return ConsoleColor.Red;
+            return ConsoleColor.Gray;
+        }
+
+
         public TemperatureService()
         {
             _serverPrivate = KeyStore.LoadOrCreateRsa(@"keys\server.private.xml", includePrivate: true);
@@ -63,8 +96,25 @@ namespace DUS.Server
                     _ => new ClientState { ClientId = request.ClientId, Role = ClientRole.Standby },
                     (_, s) => s);
 
+                var wasDead = state.IsDead;
+
                 state.LastSeenUtc = DateTime.UtcNow;
-                state.IsDead = false;
+
+                // Ako server dobije poruku od klijenta za kog je mislio da je mrtav -> prebaci ga u standby
+                if (wasDead)
+                {
+                    state.IsDead = false;
+                    state.Role = ClientRole.Standby;
+
+                    var old = Console.ForegroundColor;
+                    Console.ForegroundColor = ConsoleColor.DarkGray;
+                    Console.WriteLine("REVIVED client={0} -> forced STANDBY (per spec)", request.ClientId);
+                    Console.ForegroundColor = old;
+                }
+                else
+                {
+                    state.IsDead = false;
+                }
 
                 EnsureFiveActive();
 
@@ -74,6 +124,7 @@ namespace DUS.Server
                     Role = state.Role,
                     AssignedConsoleColor = state.AssignedColor
                 };
+
             }
             catch (Exception ex)
             {
@@ -107,8 +158,17 @@ namespace DUS.Server
 
                 if (payload.Priority != AlarmPriority.P0_None)
                 {
-                    Console.WriteLine("ALARM {0} sensor={1} value={2:F2}", payload.Priority, payload.SensorId, payload.Value);
+                    var old = Console.ForegroundColor;
+                    Console.ForegroundColor = AlarmColor(payload.Priority);
+
+                    Console.WriteLine(
+                        "ALARM {0} client={1} sensor={2} value={3:F2}",
+                        payload.Priority, request.ClientId, payload.SensorId, payload.Value
+                    );
+
+                    Console.ForegroundColor = old;
                 }
+
 
                 return new AckResponse { Ok = true };
             }
@@ -136,17 +196,19 @@ namespace DUS.Server
                         .Where(m => !m.IsConsensus && m.Priority > 0 && m.TimestampUtc >= from && m.TimestampUtc <= to)
                         .OrderByDescending(m => m.Priority)
                         .ThenBy(m => m.TimestampUtc)
-                        .Select(m => new { m.SensorId, m.Priority, m.Value, m.TimestampUtc })
+                        .Select(m => new { m.ClientId, m.SensorId, m.Priority, m.Value, m.TimestampUtc })
                         .ToList();
 
                     var items = raw
-                        .Select(m => new AlarmReportItemDto
-                        {
-                            SensorId = m.SensorId,
-                            Priority = (AlarmPriority)m.Priority,
-                            Value = m.Value,
-                            TimeUnixMs = new DateTimeOffset(m.TimestampUtc).ToUnixTimeMilliseconds()
-                        })
+                       .Select(m => new AlarmReportItemDto
+                       {
+                           ClientId = m.ClientId,
+                           SensorId = m.SensorId,
+                           Priority = (AlarmPriority)m.Priority,
+                           Value = m.Value,
+                           TimeUnixMs = new DateTimeOffset(m.TimestampUtc).ToUnixTimeMilliseconds()
+                       })
+
                         .ToList();
 
 
@@ -197,19 +259,39 @@ namespace DUS.Server
         private void FailoverTick()
         {
             var now = DateTime.UtcNow;
+            bool anyDeath = false;
 
             foreach (var kv in _clients)
             {
                 var s = kv.Value;
-                if (s.Role == ClientRole.Active && (now - s.LastSeenUtc) > HeartbeatTimeout)
+
+                // mrtav ako ga nema duže od 15s (bez obzira na rolu)
+                if (!s.IsDead && (now - s.LastSeenUtc) > HeartbeatTimeout)
                 {
+                    var oldRole = s.Role;
+
                     s.IsDead = true;
-                    s.Role = ClientRole.Standby;
+                    if (s.Role == ClientRole.Active)
+                        s.Role = ClientRole.Standby;
+
+                    anyDeath = true;
+
+                    var old = Console.ForegroundColor;
+                    Console.ForegroundColor = ConsoleColor.DarkGray;
+                    Console.WriteLine($"DEAD client={s.ClientId} roleWas={oldRole} lastSeen={s.LastSeenUtc:HH:mm:ss}");
+                    Console.ForegroundColor = old;
                 }
             }
 
-            EnsureFiveActive();
+            if (anyDeath)
+            {
+                EnsureFiveActive();
+
+                var active = _clients.Values.Count(c => c.Role == ClientRole.Active && !c.IsDead);
+                Console.WriteLine($"AFTER PROMOTION active={active}");
+            }
         }
+
 
         private void EnsureFiveActive()
         {
@@ -224,10 +306,21 @@ namespace DUS.Server
             foreach (var c in candidates)
             {
                 if (active >= 5) break;
+
+                c.IsDead = false;
                 c.Role = ClientRole.Active;
+
+                if (string.IsNullOrWhiteSpace(c.AssignedColor) ||
+                    c.AssignedColor.Equals("Gray", StringComparison.OrdinalIgnoreCase))
+                {
+                    c.AssignedColor = PickFreeActiveColor();
+                }
+
                 active++;
             }
+
         }
+
 
         private void ConsensusTick()
         {
