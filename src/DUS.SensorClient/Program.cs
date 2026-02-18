@@ -28,21 +28,25 @@ namespace DUS.SensorClient
             DataQuality q;
             if (!Enum.TryParse(qStr, out q)) q = DataQuality.GOOD;
 
-            Directory.CreateDirectory("keys");
+            KeyPaths.EnsureDirs();
 
-            // Client keys
-            var clientRsa = KeyStore.LoadOrCreateRsa(Path.Combine("keys", clientId + ".private.xml"), includePrivate: true);
-            File.WriteAllText(Path.Combine("keys", clientId + ".public.xml"), clientRsa.ToXmlString(false));
+            // Client keys (privatni u private folderu)
+            var clientRsa = KeyStore.LoadOrCreateRsa(KeyPaths.ClientPrivate(clientId), includePrivate: true);
 
-            // Server public key must be copied here from Server output folder
-            var serverPubPath = Path.Combine("keys", "server.public.xml");
+            // Public klju? u shared clients folder (da server vidi)
+            File.WriteAllText(KeyPaths.ClientPublic(clientId), clientRsa.ToXmlString(false));
+
+            // Server public key u shared root
+            var serverPubPath = KeyPaths.ServerPublic;
             if (!File.Exists(serverPubPath))
             {
-                Console.WriteLine("Missing keys\\server.public.xml. Copy server public key here first.");
+                Console.WriteLine("Missing server public key: " + serverPubPath);
+                Console.WriteLine("Start SERVER once (on first run) to generate it.");
                 Console.ReadLine();
                 return;
             }
             var serverPub = KeyStore.LoadPublic(serverPubPath);
+
 
             var factory = new ChannelFactory<ITemperatureService>("TemperatureServiceEndpoint");
             var proxy = factory.CreateChannel();
@@ -66,7 +70,14 @@ namespace DUS.SensorClient
                         serverPub);
 
                     var resp = proxy.Heartbeat(env);
-                    if (resp != null && resp.Ok) _role = resp.Role;
+                    if (resp != null && resp.Ok)
+                    {
+                        if (resp.Role != _role)
+                        {
+                            _role = resp.Role;
+                            Console.WriteLine("ROLE -> " + _role);
+                        }
+                    }
                 }
                 catch { }
             }, null, 0, 5000);

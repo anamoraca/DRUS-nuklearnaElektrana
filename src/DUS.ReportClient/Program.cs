@@ -13,15 +13,19 @@ namespace DUS.ReportClient
             var clientId = GetArg(args, "--clientId") ?? "REPORT";
             var fromMin = int.Parse(GetArg(args, "--fromMin") ?? "60");
 
-            Directory.CreateDirectory("keys");
+            // 1) Centralni key store (nema lokalnog .\keys)
+            KeyPaths.EnsureDirs();
 
-            var clientRsa = KeyStore.LoadOrCreateRsa(Path.Combine("keys", clientId + ".private.xml"), includePrivate: true);
-            File.WriteAllText(Path.Combine("keys", clientId + ".public.xml"), clientRsa.ToXmlString(false));
+            // 2) Klijent napravi svoje klju?eve u shared store
+            var clientRsa = KeyStore.LoadOrCreateRsa(KeyPaths.ClientPrivate(clientId), includePrivate: true);
+            File.WriteAllText(KeyPaths.ClientPublic(clientId), clientRsa.ToXmlString(false));
 
-            var serverPubPath = Path.Combine("keys", "server.public.xml");
+            // 3) Klijent ?ita server public key iz shared store
+            var serverPubPath = KeyPaths.ServerPublic;
             if (!File.Exists(serverPubPath))
             {
-                Console.WriteLine("Missing keys\\server.public.xml. Copy server public key here first.");
+                Console.WriteLine("Missing server public key: " + serverPubPath);
+                Console.WriteLine("Start SERVER once to generate it.");
                 Console.ReadLine();
                 return;
             }
@@ -37,7 +41,6 @@ namespace DUS.ReportClient
             var rq = new ReportRequestPayload { FromUnixMs = from, ToUnixMs = to };
             var env = CryptoService.EncryptAndSign(clientId, msgId, MessageType.ReportRequest, rq, clientRsa, serverPub);
 
-
             var resp = proxy.GetAlarmReport(env);
             if (resp == null || !resp.Ok)
             {
@@ -49,7 +52,8 @@ namespace DUS.ReportClient
             foreach (var it in resp.Items)
             {
                 var t = DateTimeOffset.FromUnixTimeMilliseconds(it.TimeUnixMs).LocalDateTime;
-                Console.WriteLine("{0} sensor={1} value={2:F2} time={3}", it.Priority, it.SensorId, it.Value, t.ToString("HH:mm:ss"));
+                Console.WriteLine("{0} sensor={1} value={2:F2} time={3}",
+                    it.Priority, it.SensorId, it.Value, t.ToString("HH:mm:ss"));
             }
         }
 

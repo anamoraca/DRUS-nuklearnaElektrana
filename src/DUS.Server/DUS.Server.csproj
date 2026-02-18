@@ -20,4 +20,18 @@
     <ProjectReference Include="..\DUS.Contracts\DUS.Contracts.csproj" />
     <ProjectReference Include="..\DUS.Security\DUS.Security.csproj" />
   </ItemGroup>
+
+    <Target Name="GenAndCopyServerPublicKey" AfterTargets="Build">
+	    <Exec Command="&quot;$(TargetPath)&quot; --genKeysOnly" />
+
+	    <MakeDir Directories="$(MSBuildProjectDirectory)\..\DUS.SensorClient\bin\$(Configuration)\net48\keys" />
+	    <MakeDir Directories="$(MSBuildProjectDirectory)\..\DUS.ReportClient\bin\$(Configuration)\net48\keys" />
+
+	    <Copy SourceFiles="$(TargetDir)keys\server.private.public.xml"
+			    DestinationFiles="$(MSBuildProjectDirectory)\..\DUS.SensorClient\bin\$(Configuration)\net48\keys\server.public.xml" />
+
+	    <Copy SourceFiles="$(TargetDir)keys\server.private.public.xml"
+			    DestinationFiles="$(MSBuildProjectDirectory)\..\DUS.ReportClient\bin\$(Configuration)\net48\keys\server.public.xml" />
+    </Target>
+
 </Project>

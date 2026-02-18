@@ -34,13 +34,19 @@ namespace DUS.Server
 
         public TemperatureService()
         {
-            _serverPrivate = KeyStore.LoadOrCreateRsa(@"keys\server.private.xml", includePrivate: true);
+            KeyPaths.EnsureDirs();
+
+            _serverPrivate = KeyStore.LoadOrCreateRsa(KeyPaths.ServerPrivate, includePrivate: true);
+
+            if (System.IO.File.Exists(KeyPaths.ServerPrivatePublic))
+                System.IO.File.Copy(KeyPaths.ServerPrivatePublic, KeyPaths.ServerPublic, true);
+            else
+                System.IO.File.WriteAllText(KeyPaths.ServerPublic, _serverPrivate.ToXmlString(false));
 
             _failureDetector = new Timer(_ => FailoverTick(), null, FailureScanPeriod, FailureScanPeriod);
             _consensusTimer = new Timer(_ => ConsensusTick(), null, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
         }
 
-        // V0: Register je opcioni; koristimo pre-shared public keys fajlove
         public RegisterResponse Register(SecureEnvelope request)
         {
             return new RegisterResponse
@@ -65,6 +71,18 @@ namespace DUS.Server
 
                 state.LastSeenUtc = DateTime.UtcNow;
                 state.IsDead = false;
+
+                // Ako se vratio nakon mrtav, u standby
+                if (DateTime.UtcNow < state.DeadUntilUtc)
+                {
+                    state.Role = ClientRole.Standby;
+                    return new HeartbeatResponse
+                    {
+                        Ok = true,
+                        Role = state.Role,
+                        AssignedConsoleColor = state.AssignedColor
+                    };
+                }
 
                 EnsureFiveActive();
 
@@ -107,8 +125,17 @@ namespace DUS.Server
 
                 if (payload.Priority != AlarmPriority.P0_None)
                 {
-                    Console.WriteLine("ALARM {0} sensor={1} value={2:F2}", payload.Priority, payload.SensorId, payload.Value);
+                    var old = Console.ForegroundColor;
+                    if (payload.Priority == AlarmPriority.P1) Console.ForegroundColor = ConsoleColor.Yellow;
+                    else if (payload.Priority == AlarmPriority.P2) Console.ForegroundColor = ConsoleColor.DarkYellow; // “narandžasto”
+                    else if (payload.Priority == AlarmPriority.P3) Console.ForegroundColor = ConsoleColor.Red;
+
+                    Console.WriteLine("ALARM {0} client={1} sensor={2} value={3:F2}",
+                        payload.Priority, request.ClientId, payload.SensorId, payload.Value);
+
+                    Console.ForegroundColor = old;
                 }
+
 
                 return new AckResponse { Ok = true };
             }
@@ -184,8 +211,7 @@ namespace DUS.Server
             if (_clientPublicKeys.TryGetValue(clientId, out rsa))
                 return rsa;
 
-            // V0: pre-shared key fajl
-            var path = string.Format(@"keys\clients\{0}.public.xml", clientId);
+            var path = KeyPaths.ClientPublic(clientId);
             if (!System.IO.File.Exists(path))
                 throw new InvalidOperationException("Unknown client. Missing public key: " + path);
 
@@ -205,6 +231,8 @@ namespace DUS.Server
                 {
                     s.IsDead = true;
                     s.Role = ClientRole.Standby;
+                    s.DeadUntilUtc = DateTime.UtcNow.AddSeconds(30); // “karantin” 30s
+
                 }
             }
 
@@ -279,6 +307,8 @@ namespace DUS.Server
             public DateTime LastSeenUtc;
             public bool IsDead;
             public string AssignedColor;
+            public DateTime DeadUntilUtc;
+
 
             public ClientState()
             {
@@ -287,6 +317,8 @@ namespace DUS.Server
                 LastSeenUtc = DateTime.UtcNow;
                 IsDead = false;
                 AssignedColor = "Gray";
+                DeadUntilUtc = DateTime.MinValue;
+
             }
         }
     }
