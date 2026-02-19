@@ -21,6 +21,7 @@ namespace DUS.Contracts
         }
     }
 
+    // Response DTOs
     [DataContract]
     public class RegisterPayload
     {
@@ -44,10 +45,19 @@ namespace DUS.Contracts
     [DataContract]
     public class MeasurementPayload
     {
+        //  senzor ID
         [DataMember] public int SensorId { get; set; }
+
+        // vrednost temperature
         [DataMember] public double Value { get; set; }
+
+        //  kvalitet GOOD/BAD/UNCERTAIN
         [DataMember] public DataQuality Quality { get; set; }
+
+        //  alarm prioritet 0/1/2/3
         [DataMember] public AlarmPriority Priority { get; set; }
+
+        // vreme merenja (radi baze/izveštaja)
         [DataMember] public long MeasuredAtUnixMs { get; set; }
     }
 
@@ -61,6 +71,7 @@ namespace DUS.Contracts
     [DataContract]
     public class AlarmReportItemDto
     {
+        // na kom senzoru/klijentu se desilo + kada + prioritet
         [DataMember] public string ClientId { get; set; }
         [DataMember] public int SensorId { get; set; }
         [DataMember] public AlarmPriority Priority { get; set; }

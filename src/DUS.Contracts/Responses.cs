@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Runtime.Serialization;
 
 namespace DUS.Contracts
@@ -21,6 +21,7 @@ namespace DUS.Contracts
     [DataContract]
     public class HeartbeatResponse
     {
+        //  server vraća rolu (Active/Standby) + boju active senzoru
         [DataMember] public bool Ok { get; set; }
         [DataMember] public string Error { get; set; }
         [DataMember] public ClientRole Role { get; set; }

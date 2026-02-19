@@ -11,9 +11,9 @@ namespace DUS.Server
         public int SensorId { get; set; }
         public DateTime TimestampUtc { get; set; }
         public double Value { get; set; }
-        public int Quality { get; set; }
-        public int Priority { get; set; }
-        public bool IsConsensus { get; set; }
+        public int Quality { get; set; }     // 0/1/2
+        public int Priority { get; set; }    // 0/1/2/3
+        public bool IsConsensus { get; set; } //  flag (konsenzus ili ne)
 
         public MeasurementEntity()
         {

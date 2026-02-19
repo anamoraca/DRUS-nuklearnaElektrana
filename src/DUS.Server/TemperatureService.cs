@@ -12,30 +12,38 @@ namespace DUS.Server
     [ServiceBehavior(InstanceContextMode = InstanceContextMode.Single, ConcurrencyMode = ConcurrencyMode.Multiple)]
     public class TemperatureService : ITemperatureService
     {
+        // SECURITY: server private key (za decrypt + verify)
         private readonly RSACryptoServiceProvider _serverPrivate;
 
+        // Public key-evi klijenata
         private readonly ConcurrentDictionary<string, RSACryptoServiceProvider> _clientPublicKeys =
             new ConcurrentDictionary<string, RSACryptoServiceProvider>();
 
+        // stanje klijenata (role, lastSeen, dead)
         private readonly ConcurrentDictionary<string, ClientState> _clients =
             new ConcurrentDictionary<string, ClientState>();
 
+
+        //  poslednji MessageId i poslednji Timestamp po klijentu
         private readonly ConcurrentDictionary<string, long> _lastMsgId =
             new ConcurrentDictionary<string, long>();
-
         private readonly ConcurrentDictionary<string, long> _lastTs =
             new ConcurrentDictionary<string, long>();
+
 
         private readonly Timer _failureDetector;
         private readonly Timer _consensusTimer;
 
+        //  HB 5s, dead posle 15s, scan 5s
         private static readonly TimeSpan HeartbeatTimeout = TimeSpan.FromSeconds(15);
         private static readonly TimeSpan FailureScanPeriod = TimeSpan.FromSeconds(5);
 
+
+        // boje active senzora
         private static readonly string[] ActivePalette = new[]
-{
-    "Cyan", "Green", "Magenta", "Blue", "White"
-};
+            {
+                "Cyan", "Green", "Magenta", "Blue", "White"
+            };
 
         private string PickFreeActiveColor()
         {
@@ -69,7 +77,10 @@ namespace DUS.Server
         {
             _serverPrivate = KeyStore.LoadOrCreateRsa(@"keys\server.private.xml", includePrivate: true);
 
+            //  failover scan na 5s
             _failureDetector = new Timer(_ => FailoverTick(), null, FailureScanPeriod, FailureScanPeriod);
+
+            //  konsenzus na 1 minut
             _consensusTimer = new Timer(_ => ConsensusTick(), null, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
         }
 
@@ -83,6 +94,7 @@ namespace DUS.Server
             };
         }
 
+        //  HB svakih 5s; server vra?a rolu Active/Standby
         public HeartbeatResponse Heartbeat(SecureEnvelope request)
         {
             try
@@ -116,6 +128,7 @@ namespace DUS.Server
                     state.IsDead = false;
                 }
 
+                //  održavaj 5 aktivnih
                 EnsureFiveActive();
 
                 return new HeartbeatResponse
@@ -132,6 +145,7 @@ namespace DUS.Server
             }
         }
 
+        //  server prima merenje, upisuje u bazu, i ako je alarm ispisuje obojeno
         public AckResponse SendMeasurement(SecureEnvelope request)
         {
             try
@@ -141,6 +155,7 @@ namespace DUS.Server
                 var pub = GetClientPublicKeyOrThrow(request.ClientId);
                 var payload = CryptoService.DecryptAndVerify<MeasurementPayload>(request, _serverPrivate, pub);
 
+                // upis u bazu
                 using (var db = new DusDbContext())
                 {
                     db.Measurements.Add(new MeasurementEntity
@@ -156,6 +171,7 @@ namespace DUS.Server
                     db.SaveChanges();
                 }
 
+                //  server ispisuje alarm + boja po prioritetu
                 if (payload.Priority != AlarmPriority.P0_None)
                 {
                     var old = Console.ForegroundColor;
@@ -178,6 +194,7 @@ namespace DUS.Server
             }
         }
 
+        //  Report klijent dobija sve alarme iz intervala, sortirano po prioritetu
         public AlarmReportResponse GetAlarmReport(SecureEnvelope request)
         {
             try
@@ -194,7 +211,7 @@ namespace DUS.Server
                 {
                     var raw = db.Measurements
                         .Where(m => !m.IsConsensus && m.Priority > 0 && m.TimestampUtc >= from && m.TimestampUtc <= to)
-                        .OrderByDescending(m => m.Priority)
+                        .OrderByDescending(m => m.Priority)// sortirano po prioritetu
                         .ThenBy(m => m.TimestampUtc)
                         .Select(m => new { m.ClientId, m.SensorId, m.Priority, m.Value, m.TimestampUtc })
                         .ToList();
@@ -220,6 +237,8 @@ namespace DUS.Server
                 return new AlarmReportResponse { Ok = false, Error = ex.Message };
             }
         }
+
+        // ===== SECURITY: anti-replay =====
 
         private void AntiReplayCheck(SecureEnvelope env)
         {
@@ -256,6 +275,7 @@ namespace DUS.Server
             return rsa;
         }
 
+        // ===== : FAILOVER deo =====
         private void FailoverTick()
         {
             var now = DateTime.UtcNow;
@@ -292,7 +312,7 @@ namespace DUS.Server
             }
         }
 
-
+        // održavaj da uvek ima 5 active
         private void EnsureFiveActive()
         {
             var active = _clients.Values.Count(c => c.Role == ClientRole.Active && !c.IsDead);
@@ -321,7 +341,7 @@ namespace DUS.Server
 
         }
 
-
+        // =====  KONSENZUS deo =====
         private void ConsensusTick()
         {
             try
@@ -331,6 +351,7 @@ namespace DUS.Server
 
                 using (var db = new DusDbContext())
                 {
+                    //  samo GOOD ulazi u konsenzus
                     var values = db.Measurements
                         .Where(m => !m.IsConsensus
                                     && m.TimestampUtc >= from
@@ -344,6 +365,8 @@ namespace DUS.Server
                     var avg = values.Average(v => v.Value);
                     const double eps = 5.0;
 
+                    //  poslednja vrednost u ±5 od proseka; ako nema, uzmi poslednju
+
                     var lastInRange = values.LastOrDefault(v => Math.Abs(v.Value - avg) <= eps) ?? values.Last();
 
                     db.Measurements.Add(new MeasurementEntity
@@ -354,7 +377,7 @@ namespace DUS.Server
                         Value = lastInRange.Value,
                         Quality = (int)DataQuality.GOOD,
                         Priority = 0,
-                        IsConsensus = true
+                        IsConsensus = true //  flag konsenzus
                     });
                     db.SaveChanges();
                 }

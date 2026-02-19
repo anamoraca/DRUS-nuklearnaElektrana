@@ -15,9 +15,11 @@ namespace DUS.ReportClient
 
             Directory.CreateDirectory("keys");
 
+            // SECURITY: report klijent ima svoj RSA klju? (potpisuje poruku)
             var clientRsa = KeyStore.LoadOrCreateRsa(Path.Combine("keys", clientId + ".private.xml"), includePrivate: true);
             File.WriteAllText(Path.Combine("keys", clientId + ".public.xml"), clientRsa.ToXmlString(false));
 
+            // SECURITY: server public key
             var serverPubPath = Path.Combine("keys", "server.public.xml");
             if (!File.Exists(serverPubPath))
             {
@@ -30,6 +32,7 @@ namespace DUS.ReportClient
             var factory = new ChannelFactory<ITemperatureService>("TemperatureServiceEndpoint");
             var proxy = factory.CreateChannel();
 
+            //  report pravi izveštaj iz baze u trenutku pokretanja
             var to = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             var from = DateTimeOffset.UtcNow.AddMinutes(-fromMin).ToUnixTimeMilliseconds();
 

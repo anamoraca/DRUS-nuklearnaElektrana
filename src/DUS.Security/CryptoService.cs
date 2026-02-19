@@ -10,6 +10,11 @@ namespace DUS.Security
 {
     public static class CryptoService
     {
+        // (pouzdana komunikacija):
+        // - sve poruke su šifrovane (AES)
+        // - AES key se šifruje server public key-om (RSA)
+        // - potpisuje se (RSA SHA256) da nema opovrgavanja
+
         public static SecureEnvelope EncryptAndSign<TPayload>(
             string clientId,
             long messageId,
